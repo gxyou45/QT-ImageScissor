@@ -10,21 +10,30 @@
     <height>707</height>
    </rect>
   </property>
+  <property name="mouseTracking">
+   <bool>true</bool>
+  </property>
   <property name="windowTitle">
    <string>ImageScissor</string>
   </property>
   <widget class="QWidget" name="centralWidget">
+   <property name="mouseTracking">
+    <bool>true</bool>
+   </property>
    <widget class="QScrollArea" name="scrollArea">
     <property name="geometry">
      <rect>
-      <x>9</x>
-      <y>29</y>
-      <width>831</width>
-      <height>601</height>
+      <x>0</x>
+      <y>0</y>
+      <width>780</width>
+      <height>600</height>
      </rect>
     </property>
-    <property name="autoFillBackground">
+    <property name="mouseTracking">
      <bool>true</bool>
+    </property>
+    <property name="autoFillBackground">
+     <bool>false</bool>
     </property>
     <property name="widgetResizable">
      <bool>true</bool>
@@ -34,53 +43,33 @@
       <rect>
        <x>0</x>
        <y>0</y>
-       <width>829</width>
-       <height>599</height>
+       <width>778</width>
+       <height>598</height>
       </rect>
      </property>
-     <property name="autoFillBackground">
+     <property name="mouseTracking">
       <bool>true</bool>
+     </property>
+     <property name="autoFillBackground">
+      <bool>false</bool>
      </property>
      <widget class="QLabel" name="label">
       <property name="geometry">
        <rect>
-        <x>-1</x>
-        <y>5</y>
-        <width>831</width>
-        <height>591</height>
+        <x>0</x>
+        <y>0</y>
+        <width>760</width>
+        <height>580</height>
        </rect>
+      </property>
+      <property name="mouseTracking">
+       <bool>true</bool>
       </property>
       <property name="text">
        <string>TextLabel</string>
       </property>
      </widget>
     </widget>
-   </widget>
-   <widget class="QPushButton" name="pushButton">
-    <property name="geometry">
-     <rect>
-      <x>10</x>
-      <y>0</y>
-      <width>61</width>
-      <height>32</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>Start</string>
-    </property>
-   </widget>
-   <widget class="QPushButton" name="pushButton_2">
-    <property name="geometry">
-     <rect>
-      <x>60</x>
-      <y>0</y>
-      <width>61</width>
-      <height>32</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>Stop</string>
-    </property>
    </widget>
   </widget>
   <widget class="QMenuBar" name="menuBar">
@@ -122,11 +111,23 @@
     <property name="title">
      <string>Debug</string>
     </property>
+    <addaction name="actionPixel_Node"/>
+    <addaction name="actionCost_Graph"/>
+    <addaction name="actionPath_Tree"/>
+    <addaction name="actionMin_Path"/>
+   </widget>
+   <widget class="QMenu" name="menuWork">
+    <property name="title">
+     <string>Work</string>
+    </property>
+    <addaction name="actionImage_Only"/>
+    <addaction name="actionImage_with_Contour"/>
    </widget>
    <addaction name="menuImage_Scissor"/>
    <addaction name="menuFile"/>
-   <addaction name="menuEdit"/>
    <addaction name="menuDebug"/>
+   <addaction name="menuWork"/>
+   <addaction name="menuEdit"/>
   </widget>
   <widget class="QToolBar" name="mainToolBar">
    <attribute name="toolBarArea">
@@ -196,6 +197,46 @@
    </property>
    <property name="shortcutVisibleInContextMenu">
     <bool>true</bool>
+   </property>
+  </action>
+  <action name="actionPixel_Node">
+   <property name="text">
+    <string>Pixel Node</string>
+   </property>
+  </action>
+  <action name="actionCost_Graph">
+   <property name="text">
+    <string>Cost Graph</string>
+   </property>
+  </action>
+  <action name="actionPath_Tree">
+   <property name="text">
+    <string>Path Tree</string>
+   </property>
+  </action>
+  <action name="actionMin_Path">
+   <property name="text">
+    <string>Min Path</string>
+   </property>
+  </action>
+  <action name="actionSave_Contour_2">
+   <property name="text">
+    <string>Save Contour</string>
+   </property>
+  </action>
+  <action name="actionSave_Mask_2">
+   <property name="text">
+    <string>Save Mask</string>
+   </property>
+  </action>
+  <action name="actionImage_Only">
+   <property name="text">
+    <string>Image Only</string>
+   </property>
+  </action>
+  <action name="actionImage_with_Contour">
+   <property name="text">
+    <string>Image with Contour</string>
    </property>
   </action>
  </widget>

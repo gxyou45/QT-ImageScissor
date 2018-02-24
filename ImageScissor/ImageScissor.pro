@@ -21,16 +21,20 @@ DEFINES += QT_DEPRECATED_WARNINGS
 # In order to do so, uncomment the following line.
 # You can also select to disable deprecated APIs only up to a certain version of Qt.
 #DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
-INCLUDEPATH += /usr/include/c++/{gcc_version}/
+INCLUDEPATH += /usr/local/Cellar/opencv/3.4.0_1/include
 
 SOURCES += \
         main.cpp \
         imagescissor.cpp \
-    imagelabel.cpp
+    imagelabel.cpp \
+    imagenode.cpp
 
 HEADERS += \
         imagescissor.h \
-    imagelabel.h
+    imagelabel.h \
+    imagenode.h
 
 FORMS += \
         imagescissor.ui
+
+LIBS += -L/usr/local/Cellar/opencv/3.4.0_1/lib -lopencv_core -lopencv_imgcodecs -lopencv_highgui

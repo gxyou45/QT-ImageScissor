@@ -45,9 +45,9 @@
 //***************************************************************************
 
 #include <stdlib.h>
-#include <iostream.h>
-#include <stdio.h>
-// #include <conio.h>
+//#include <iostream.h>
+//#include <stdio.h>
+//#include <conio.h>
 
 #include "fibheap.h"
 
@@ -155,11 +155,13 @@ int X;
 // Print()
 //=========================================================
 
-void FibHeapNode::Print()
+/*
+ * void FibHeapNode::Print()
 {
      if (NegInfinityFlag)
-	 cout << "-inf.";
+     //cout << "-inf.";
 }
+*/
 
 //***************************************************************************
 //===========================================================================
@@ -445,7 +447,7 @@ int Result;
 // value for each node along the root list, then it calls itself on each
 // child list.   
 //========================================================================
-
+/*
 void FibHeap::Print(FibHeapNode *Tree, FibHeapNode *theParent)
 {
 FibHeapNode* Temp = NULL;
@@ -494,7 +496,7 @@ FibHeapNode* Temp = NULL;
 	 cout << "Done Printing.  Hit a key.\n";
          cin >> ch;
      }
-}
+}*/
 
 //===========================================================================
 //===========================================================================
