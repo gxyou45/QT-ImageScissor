@@ -1,6 +1,27 @@
 #include "imagescissor.h"
 #include "ui_imagescissor.h"
 
+Node graphNode[2048][2048];
+double costMax = 0;
+
+static void initialGraphNode(const QImage *loadImage){
+    costMax = 0;
+    int id;
+    for(int i = 0;i < loadImage->width();i++)
+    {
+        for(int j = 0; j < loadImage->height();j++)
+        {
+            id = j * loadImage->width() + i;
+            graphNode[i][j].row = i;
+            graphNode[i][j].column = j;
+            graphNode[i][j].state = 0;
+            graphNode[i][j].prevNode = NULL;
+            graphNode[i][j].totalCost = MAX;
+            graphNode[i][j].maxDeriv = 0;
+        }
+    }
+}
+
 ImageScissor::ImageScissor(QWidget *parent) :
     QMainWindow(parent),
     ui(new Ui::ImageScissor)
@@ -20,13 +41,13 @@ ImageScissor::ImageScissor(QWidget *parent) :
     ui->scrollArea->setMouseTracking(true);
 
     scale_xy = 1;
-    work_mode = true;
+    work_mode = false;
 
     scribbling = false;
-    myPenColor = Qt::red;
-    myPenWidth = 2;
-
     pathTreeMode = false;
+    debugEnable = false;
+    minPathEnable = false;
+
 }
 
 ImageScissor::~ImageScissor()
@@ -34,13 +55,45 @@ ImageScissor::~ImageScissor()
     delete ui;
 }
 
-struct greaterNode
+void ImageScissor::setImage(const QImage &newImage)
 {
-    bool operator() (Node *a, Node *b)
-    {
-        return a->totalCost > b->totalCost;
-    }
-};
+    Load_Image = newImage;
+    qpixmap = QPixmap::fromImage(Load_Image);
+    ui->label->setPixmap(qpixmap);
+
+    org_width = Load_Image.width();
+    org_height = Load_Image.height();
+
+    scale_xy = 1.0;
+
+    //ui->scrollArea->setVisible(true);
+    ui->label->setVisible(true);
+
+    //fitToWindowAct->setEnabled(true);
+    //updateActions();
+    //if (!fitToWindowAct->isChecked())
+    //    imageLabel->adjustSize();
+
+    double factor = 400.0/Load_Image.width();
+    scaleImage(factor);
+    computeCost();
+
+    lastPoint = QPoint(0,0);
+    seedPoints.clear();
+    wirePoints.clear();
+    wirePointsVector.clear();
+
+}
+
+void ImageScissor::scaleImage(double factor)
+{
+    Q_ASSERT(ui->label->pixmap());
+    scale_xy *= factor;
+    ui->label->resize(scale_xy * Load_Image.size());
+
+    adjustScrollBar(ui->scrollArea->horizontalScrollBar(), factor);
+    adjustScrollBar(ui->scrollArea->verticalScrollBar(), factor);
+}
 
 void ImageScissor::on_actionOpen_triggered()
 {
@@ -53,27 +106,37 @@ void ImageScissor::on_actionOpen_triggered()
             QMessageBox::warning(this,"..","Failed to load image.");
             return;
         }
-        Load_Image = Loaded_Image.copy();
+        //Load_Image = Loaded_Image.copy();
         Contour_Image = Loaded_Image.copy();
         org_width = Loaded_Image.width();
         org_height = Loaded_Image.height();
 
-        qpixmap = QPixmap::fromImage(Loaded_Image);
-        ui->label->setPixmap(qpixmap);
-        ui->label->resize(scale_xy * (ui->label->pixmap()->size()));
-        ui->label->setVisible(true);
+        initialGraphNode(&Loaded_Image);
+        blur0 = Loaded_Image;
+        blur2 = blurred(Loaded_Image,Loaded_Image.rect(),2,false);
+        blur4 = blurred(Loaded_Image,Loaded_Image.rect(),4,false);
+        blur8 = blurred(Loaded_Image,Loaded_Image.rect(),8,false);
+        setImage(Loaded_Image);
+
 
         ui->actionZoom_In->setShortcut(QKeySequence::ZoomIn);
         ui->actionZoom_In->setEnabled(true);
         ui->actionZoom_Out->setShortcut(QKeySequence::ZoomOut);
         ui->actionZoom_Out->setEnabled(true);
         ui->actionScissor_Start->setEnabled(true);
-        //ui->actionPixel_Node->setEnabled(true);
 
-        //statusBar()->showMessage(QString("%1, %2").arg(org_width).arg(org_height));
-        getPixelNode();
-        computeCost(Load_Image);
-        getCostGraph();
+        this->finishCurrentContourSC = new QShortcut(QKeySequence("Return"), this);
+        QObject::connect(this->finishCurrentContourSC, SIGNAL(activated()), this, SLOT(finishCurrentContour()));
+        this->finishCurrentContourSC->setEnabled(false);
+
+        this->finishCurrentContourCloseSC = new QShortcut(QKeySequence("Ctrl+Return"), ui->label);
+        QObject::connect(this->finishCurrentContourCloseSC, SIGNAL(activated()), ui->label, SLOT(finishCurrentContour()));
+        this->finishCurrentContourCloseSC->setEnabled(false);
+
+        this->undoSC = new QShortcut(QKeySequence("Backspace"), ui->label);
+        QObject::connect(this->undoSC, SIGNAL(activated()), ui->label, SLOT(undo()));
+        this->undoSC->setEnabled(false);
+
     }
 
 }
@@ -93,6 +156,11 @@ void ImageScissor::on_actionScissor_Start_triggered()
     ui->actionScissor_Start->setDisabled(true);
     ui->actionScissor_Stop->setEnabled(true);
     ui->actionScissor_Undo->setEnabled(true);
+    scribbling = true;
+    moveEnable = true;
+    this->finishCurrentContourSC->setEnabled(true);
+    this->finishCurrentContourCloseSC->setEnabled(true);
+    this->undoSC->setEnabled(true);
 }
 
 void ImageScissor::on_actionScissor_Stop_triggered()
@@ -100,6 +168,8 @@ void ImageScissor::on_actionScissor_Stop_triggered()
     ui->actionScissor_Start->setEnabled(true);
     ui->actionScissor_Stop->setDisabled(true);
     ui->actionScissor_Undo->setEnabled(true);
+
+    finishCurrentContour();
 }
 
 void ImageScissor::on_actionScissor_Undo_triggered()
@@ -107,32 +177,122 @@ void ImageScissor::on_actionScissor_Undo_triggered()
     ui->actionScissor_Start->setEnabled(true);
     ui->actionScissor_Stop->setEnabled(true);
     ui->actionScissor_Undo->setDisabled(true);
+
+    undo();
 }
 
 void ImageScissor::on_actionSave_Contour_triggered()
 {
-
+    ui->label->setPixmap(qpixmap);
+    QImage tmp = qpixmap.toImage();
+    QString fileName = QFileDialog::getSaveFileName(this,"Save",QDir::currentPath(),"JPG-Files (*.jpg)");
+    if (!fileName.isEmpty()) {
+         if (tmp.isNull()) {
+             QMessageBox::information(this, tr("Error"),
+                                      tr("Please Load an Image First!"));
+             return;
+         }
+        tmp.save(fileName);
+    }
 }
 
 void ImageScissor::on_actionSave_Mask_triggered()
 {
+    scribbling = false;
+    moveEnable = false;
+    debugEnable = false;
+    minPathEnable = false;
+
+    if(wirePointsVector.isEmpty())
+        return;
+
+    int tmpWidth = Load_Image.width();
+    int tmpHeight = Load_Image.height();
+
+    QImage tmp(tmpWidth, tmpHeight, QImage::Format_ARGB32);
+    tmp.fill(QColor(255,255,255,0).rgba());
+
+    bool *maskMatrix = (bool*)malloc(tmpWidth * tmpHeight * sizeof(bool));
+
+    for(int j = 0; j < tmpHeight;j++){
+        for(int i = 0;i < tmpWidth;i++){
+            maskMatrix[j * tmpWidth + i] = false;
+        }
+    }
+
+    for(int i = 0;i < wirePointsVector.size();i++)
+    {
+        for(int j = wirePointsVector.at(i).size() - 1;j >= 0;j--)
+        {
+            maskMatrix[wirePointsVector.at(i).at(j).y() * tmpWidth + wirePointsVector.at(i).at(j).x()] = true;
+            //if(seedPoints.size() > 1 && wirePoints.at(i) == seedPoints.at(seedPoints.size() - 2))
+                //break;
+        }
+    }
+
+    QVector<QPoint> expandMaskVec;
+    expandMaskVec.append(QPoint(0,0));
+    //maskMatrix[0] = true;
+    while(!expandMaskVec.isEmpty())
+    {
+        QPoint point = expandMaskVec.last();
+        expandMaskVec.pop_back();
+        int tmpX = point.x();
+        int tmpY = point.y();
+
+        if(tmpX >= 0 && tmpX <= tmpWidth && tmpY >= 0 && tmpY <= tmpHeight)
+        {
+            int index = tmpY * tmpWidth + tmpX;
+            if(!maskMatrix[index])
+            {
+                maskMatrix[index] = true;
+                expandMaskVec.append(QPoint(tmpX - 1,tmpY));
+                expandMaskVec.append(QPoint(tmpX + 1,tmpY));
+                expandMaskVec.append(QPoint(tmpX,tmpY - 1));
+                expandMaskVec.append(QPoint(tmpX,tmpY + 1));
+            }
+        }
+    }
+
+    for(int i = 0;i < tmpWidth * tmpHeight;i++)
+    {
+        if(!maskMatrix[i])
+        {
+            int x = i % tmpWidth;
+            int y = (int)(i / tmpWidth);
+            QPoint tmpP(x,y);
+            tmp.setPixel(tmpP,Load_Image.pixel(tmpP));
+        }
+    }
+
+    delete maskMatrix;
+    ui->label->setPixmap(QPixmap::fromImage(tmp));
+
+    QString fileName = QFileDialog::getSaveFileName(this,"Save",QDir::currentPath(),"JPG-Files (*.jpg)");
+    if (!fileName.isEmpty()) {
+         if (tmp.isNull()) {
+             QMessageBox::information(this, tr("Error"),
+                                      tr("Please Load an Image First!"));
+             return;
+         }
+        tmp.save(fileName);
+    }
 
 }
 
 void ImageScissor::on_actionZoom_In_triggered()
 {
-    scale_xy *= 1.2;
-    ui->label->resize(scale_xy * (ui->label->pixmap()->size()));
+    scaleImage(1.25);
 }
 
 void ImageScissor::on_actionZoom_Out_triggered()
 {
-    scale_xy *= 0.8;
-    ui->label->resize(scale_xy * (ui->label->pixmap()->size()));
+    scaleImage(0.8);
 }
 
 //DEBUG MODE
-void ImageScissor::getPixelNode(){
+void ImageScissor::getPixelNode()
+{
     int curr_width = Load_Image.width();
     int curr_height = Load_Image.height();
     int width = curr_width * 3;
@@ -155,14 +315,9 @@ void ImageScissor::on_actionPixel_Node_triggered()
 {
     work_mode = false;
     //METHOD1
+    getPixelNode();
     ui->label->setPixmap(QPixmap::fromImage(Pixel_Image));
-    scale_xy = 1.2;
-    ui->label->resize(scale_xy * (ui->label->pixmap()->size()));
     update();
-
-    //cv::Mat input = qimage_to_mat_ref(Pixel_Image);
-    //cv::imshow("pixel node mode", input);
-
 }
 
 void ImageScissor::getCostGraph(){
@@ -214,153 +369,124 @@ void ImageScissor::getCostGraph(){
 void ImageScissor::on_actionCost_Graph_triggered()
 {
     work_mode = false;
+    getCostGraph();
     ui->label->setPixmap(QPixmap::fromImage(Cost_Image));
-    scale_xy = 1;
-    ui->label->resize(scale_xy * (ui->label->pixmap()->size()));
     update();
 }
 
-void ImageScissor::getPathTree(int x, int y){
-     int curr_id = y*org_width + x;
-     my_shortPath->GetPath(curr_id, graphNode, org_width, org_height);
-     drawWithPrevNode(graphNode[curr_id]);
+void ImageScissor::getPathTree(){
+    minPathEnable = false;
+    moveEnable = false;
+    scribbling = false;
+    debugEnable = true;
+
+    if(seedPoints.isEmpty())
+        return;
+    GetPath(seedPoints.last());
+
+    int tmpWidth = 3 * Load_Image.width();
+    int tmpHeight = 3 * Load_Image.height();
+
+    QImage tmp(tmpWidth, tmpHeight, QImage::Format_RGB32);
+    tmp.fill(Qt::black);
+    ui->label->setPixmap(QPixmap::fromImage(tmp));
+
+    int count = 0;
+
+    std::priority_queue<Node*, std::vector<Node*>, greaterNode> treeq;
+    for(int x = 0; x < Load_Image.width(); x++){
+        for(int y = 0; y < Load_Image.height(); y++){
+            treeq.push(&graphNode[x][y]);
+        }
+    }
+    int a_x, a_y;
+    while(!treeq.empty()){
+        Node* a = treeq.top();
+        a_x = a->row;
+        a_y = a->column;
+        treeq.pop();
+        int value = int(255 * a->totalCost /(costMax * 2) + 125);
+        tmp.setPixel(3 * a_x + 1, 3 * a_y + 1, QColor(value, value,0).rgb());
+        if(graphNode[a_x][a_y].prevNode != NULL)
+        {
+            int i = graphNode[a_x][a_y].prevNode->row - graphNode[a_x][a_y].row;
+            int j = graphNode[a_x][a_y].prevNode->column - graphNode[a_x][a_y].column;
+
+           //image.pixelColor(x,y).rgb());
+            tmp.setPixel(3 * a_x + 1 + i, 3 * a_y + 1 + j, QColor(value, value,0).rgb());
+            tmp.setPixel(3 * a_x + 1 + 2 * i, 3 * a_y + 1 + 2 * j, QColor(value, value,0).rgb());
+         }
+        count++;
+        if(count % 5000 == 0){
+            ui->label->setPixmap(QPixmap::fromImage(tmp));
+            delay();
+        }
+    }
+
+    //QSize tmpSize = imageLabel->pixmap()->size();
+    ui->label->setPixmap(QPixmap::fromImage(tmp));
+}
+
+void ImageScissor::delay(){
+    QTime dieTime= QTime::currentTime().addMSecs(50);
+    while (QTime::currentTime() < dieTime)
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
 }
 
 void ImageScissor::on_actionPath_Tree_triggered()
 {
-    work_mode = false;
-    pathTreeMode = true;
-    getPathTree(seed_x, seed_y);
+    getPathTree();
 }
 
 void ImageScissor::getMinPath(){
+    scribbling = false;
+    moveEnable = true;
+    debugEnable = true;
+    minPathEnable = true;
 
+    //show path tree
+    if(seedPoints.isEmpty())
+        return;
+    GetPath(seedPoints.last());
+
+    int tmpWidth = 3 * Load_Image.width();
+    int tmpHeight = 3 * Load_Image.height();
+
+    QImage tmp(tmpWidth, tmpHeight, QImage::Format_RGB32);
+    tmp.fill(Qt::black);
+    ui->label->setPixmap(QPixmap::fromImage(tmp));
+
+    std::priority_queue<Node*, std::vector<Node*>, greaterNode> treeq;
+    for(int x = 0; x < Load_Image.width(); x++){
+        for(int y = 0; y < Load_Image.height(); y++){
+            treeq.push(&graphNode[x][y]);
+        }
+    }
+    int a_x, a_y;
+    while(!treeq.empty()){
+        Node* a = treeq.top();
+        a_x = a->row;
+        a_y = a->column;
+        treeq.pop();
+        int value = int(255 * a->totalCost /(costMax * 2) + 125);
+        tmp.setPixel(3 * a_x + 1, 3 * a_y + 1, QColor(value, value,0).rgb());
+        if(graphNode[a_x][a_y].prevNode != NULL)
+        {
+            int i = graphNode[a_x][a_y].prevNode->row - graphNode[a_x][a_y].row;
+            int j = graphNode[a_x][a_y].prevNode->column - graphNode[a_x][a_y].column;
+
+           //image.pixelColor(x,y).rgb());
+            tmp.setPixel(3 * a_x + 1 + i, 3 * a_y + 1 + j, QColor(value, value,0).rgb());
+            tmp.setPixel(3 * a_x + 1 + 2 * i, 3 * a_y + 1 + 2 * j, QColor(value, value,0).rgb());
+         }
+    }
+    minPath_qpixmap = QPixmap::fromImage(tmp);
+    ui->label->setPixmap(minPath_qpixmap);
 }
 
-void ImageScissor::computeCost(QImage image){
-    //declare var
-    int w = image.width();
-    int h = image.height();
-    //int id;
-    int rDR, gDR, bDR;
-    double max = 0;
-    int id;
-    graphNode.reserve(1024*1024);
-    //get rgb data
-    //cv::Mat rgb = qimage_to_mat_ref(image, QImage::Format_RGB32);
-    for(int y = 0; y < h; y++){
-        for(int x = 0; x < w; x++){
-            //initialize
-            id = y * w + x;
-            graphNode[id] = new Node();
-            graphNode[id]->column = y;
-            graphNode[id]->row = x;
-            graphNode[id]->state = 0;
-            graphNode[id]->maxDeriv = 0;
-            graphNode[id]->totalCost = MAX;
-            graphNode[id]->prevNode = NULL;
-            if(y>=1 && x<(w-1) && y<(h-1)){
-                //D(link0)
-                rDR = abs((image.pixelColor(x,y-1).red()+image.pixelColor(x+1,y-1).red())-(image.pixelColor(x,y+1).red()+image.pixelColor(x+1,y+1).red()))/4;
-                gDR = abs((image.pixelColor(x,y-1).green()+image.pixelColor(x+1,y-1).green())-(image.pixelColor(x,y+1).green()+image.pixelColor(x+1,y+1).green()))/4;
-                bDR = abs((image.pixelColor(x,y-1).blue()+image.pixelColor(x+1,y-1).blue())-(image.pixelColor(x,y+1).blue()+image.pixelColor(x+1,y+1).blue()))/4;
-                graphNode[id]->linkCost[0] = sqrt((rDR*rDR+gDR*gDR+bDR*bDR)/3);
-
-            }
-            else{
-                graphNode[id]->linkCost[0] = 0;
-            }
-            if(y>=1 && x<(w-1)){
-                //D(link1)
-                rDR = abs(image.pixelColor(x+1,y).red()-image.pixelColor(x,y-1).red())/sqrt(2.0);
-                gDR = abs(image.pixelColor(x+1,y).green()-image.pixelColor(x,y-1).green())/sqrt(2.0);
-                bDR = abs(image.pixelColor(x+1,y).blue()-image.pixelColor(x,y-1).blue())/sqrt(2.0);
-                graphNode[id]->linkCost[1] = sqrt((rDR*rDR+gDR*gDR+bDR*bDR)/3);
-            }
-            else{
-                graphNode[id]->linkCost[1] = 0;
-            }
-            if(y>=1 && x>=1 && x<(w-1)){
-                //D(link2)
-                rDR = abs((image.pixelColor(x-1,y).red()+image.pixelColor(x-1,y-1).red())-(image.pixelColor(x+1,y).red()+image.pixelColor(x+1,y-1).red()))/4;
-                gDR = abs((image.pixelColor(x-1,y).green()+image.pixelColor(x-1,y-1).green())-(image.pixelColor(x+1,y).green()+image.pixelColor(x+1,y-1).green()))/4;
-                bDR = abs((image.pixelColor(x-1,y).blue()+image.pixelColor(x-1,y-1).blue())-(image.pixelColor(x+1,y).blue()+image.pixelColor(x+1,y-1).blue()))/4;
-                graphNode[id]->linkCost[2] = sqrt((rDR*rDR+gDR*gDR+bDR*bDR)/3);
-            }
-            else{
-                graphNode[id]->linkCost[2] = 0;
-            }
-            if(y>=1 && x>=1){
-                //D(link3)
-                rDR = abs(image.pixelColor(x-1,y).red()-image.pixelColor(x,y-1).red())/sqrt(2.0);
-                gDR = abs(image.pixelColor(x-1,y).green()-image.pixelColor(x,y-1).green())/sqrt(2.0);
-                bDR = abs(image.pixelColor(x-1,y).blue()-image.pixelColor(x,y-1).blue())/sqrt(2.0);
-                graphNode[id]->linkCost[3] = sqrt((rDR*rDR+gDR*gDR+bDR*bDR)/3);
-            }
-            else{
-                graphNode[id]->linkCost[3] = 0;
-            }
-            if(y>=1 && x>=1 && y<(h-1)){
-                //D(link4)
-                rDR = abs((image.pixelColor(x-1,y-1).red()+image.pixelColor(x,y-1).red())-(image.pixelColor(x,y+1).red()+image.pixelColor(x-1,y+1).red()))/4;
-                gDR = abs((image.pixelColor(x-1,y-1).green()+image.pixelColor(x,y-1).green())-(image.pixelColor(x,y+1).green()+image.pixelColor(x-1,y+1).green()))/4;
-                bDR = abs((image.pixelColor(x-1,y-1).blue()+image.pixelColor(x,y-1).blue())-(image.pixelColor(x,y+1).blue()+image.pixelColor(x-1,y+1).blue()))/4;
-                graphNode[id]->linkCost[4] = sqrt((rDR*rDR+gDR*gDR+bDR*bDR)/3);
-            }
-            else{
-                graphNode[id]->linkCost[4] = 0;
-            }
-            if(x>=1 && y<(h-1)){
-                //D(link5)
-                rDR = abs(image.pixelColor(x-1,y).red()-image.pixelColor(x,y+1).red())/sqrt(2.0);
-                gDR = abs(image.pixelColor(x-1,y).green()-image.pixelColor(x,y+1).green())/sqrt(2.0);
-                bDR = abs(image.pixelColor(x-1,y).blue()-image.pixelColor(x,y+1).blue())/sqrt(2.0);
-                graphNode[id]->linkCost[5] = sqrt((rDR*rDR+gDR*gDR+bDR*bDR)/3);
-            }
-            else{
-                graphNode[id]->linkCost[5] = 0;
-            }
-            if(x>=1 && y<(h-1) && x<(w-1)){
-                //D(link6)
-                rDR = abs((image.pixelColor(x-1,y+1).red()+image.pixelColor(x-1,y).red())-(image.pixelColor(x+1,y+1).red()+image.pixelColor(x+1,y).red()))/4;
-                gDR = abs((image.pixelColor(x-1,y+1).green()+image.pixelColor(x-1,y).green())-(image.pixelColor(x+1,y+1).green()+image.pixelColor(x+1,y).green()))/4;
-                bDR = abs((image.pixelColor(x-1,y+1).blue()+image.pixelColor(x-1,y).blue())-(image.pixelColor(x+1,y+1).blue()+image.pixelColor(x+1,y).blue()))/4;
-                graphNode[id]->linkCost[6] = sqrt((rDR*rDR+gDR*gDR+bDR*bDR)/3);
-            }
-            else{
-                graphNode[id]->linkCost[6] = 0;
-            }
-            if(y<(h-1) && x<(w-1)){
-                //D(link7)
-                rDR = abs(image.pixelColor(x+1,y).red()-image.pixelColor(x,y+1).red())/sqrt(2.0);
-                gDR = abs(image.pixelColor(x+1,y).green()-image.pixelColor(x,y+1).green())/sqrt(2.0);
-                bDR = abs(image.pixelColor(x+1,y).blue()-image.pixelColor(x,y+1).blue())/sqrt(2.0);
-                graphNode[id]->linkCost[7] = sqrt((rDR*rDR+gDR*gDR+bDR*bDR)/3);
-            }
-            else{
-                graphNode[id]->linkCost[7] = 0;
-            }
-
-            max = 0;
-            for(int i = 0;i < 8;i++)
-            {
-                if(graphNode[id]->linkCost[i] > max)
-                    max = graphNode[id]->linkCost[i];
-                if(graphNode[id]->linkCost[i] > graphNode[id]->maxDeriv)
-                    graphNode[id]->maxDeriv = graphNode[id]->linkCost[i];
-            }
-        }
-    }
-    for(int y = 0; y < h; y++){
-        for(int x = 0; x < w; x++){
-            for(int i = 0;i < 8;i++){
-                graphNode[id]->linkCost[i] = (max - graphNode[id]->linkCost[i])* 1;
-                if(i%2 != 0)
-                    graphNode[id]->linkCost[i] *= sqrt(2);
-            }
-        }
-    }
-
+void ImageScissor::on_actionMin_Path_triggered()
+{
+    getMinPath();
 }
 
 //WORD MODE UI
@@ -372,20 +498,12 @@ void ImageScissor::on_actionImage_Only_triggered()
     update();
 }
 
-//DRAW LINES
-void ImageScissor::setPenColor(const QColor &newColor)
-{
-    myPenColor = newColor;
-}
-
-void ImageScissor::setPenWidth(int newWidth){
-    myPenWidth = newWidth;
-}
-
+//TEST: DRAW LINES
+/*
 void ImageScissor::drawLineTo_example(const QPoint &endPoint)
 {
     QPainter painter(&Load_Image);
-    lastPoint = seeds.last();
+    lastPoint = seedPoints.last();
     painter.setPen(QPen(myPenColor, myPenWidth, Qt::SolidLine, Qt::RoundCap,
                         Qt::RoundJoin));
     painter.drawLine(lastPoint, endPoint);
@@ -397,38 +515,417 @@ void ImageScissor::drawLineTo_example(const QPoint &endPoint)
     lastPoint = endPoint;
     update();
 
-}
+}*/
 
 //DRAW NODE
-void ImageScissor::drawWithPrevNode(Node* node)
+void ImageScissor::drawWithPrevNode(QPoint mousePoint)
 {
-    if(seeds.isEmpty())
+    if(seedPoints.isEmpty())
         return;
-    Node* newNode = node;
-    QPainter painter(&Load_Image);
+    //Node* newNode = node;
+    QImage tmpImage = Load_Image.copy();
+    QPainter painter(&tmpImage);
 
     painter.setPen(QPen(Qt::red, 2, Qt::SolidLine, Qt::RoundCap,
                         Qt::RoundJoin));
 
+    Node *node = &graphNode[mousePoint.x()][mousePoint.y()];
+
     if(node != NULL)
     {
-        painter.drawPoint(QPoint(newNode->row,newNode->column));
-        newNode = node->prevNode;
+        statusBar()->showMessage(QString("Current cost%1").arg(node->totalCost));
+        painter.drawPoint(QPoint(node->row,node->column));
+        node = node->prevNode;
     }
-    ui->label->setPixmap(QPixmap::fromImage(Load_Image));
+    ui->label->setPixmap(QPixmap::fromImage(tmpImage));
     //update();
+}
+
+void ImageScissor::drawMinPath(QPoint mousePoint){
+
+    if(seedPoints.isEmpty() || !moveEnable)
+        return;
+
+    ui->label->setPixmap(qpixmap);
+    if(mousePoint.x() <= 0 ||mousePoint.y() <= 0 || !atImage(mousePoint))
+    {
+        //ui->label->setPixmap(qpixmap);
+        return;
+    }
+
+    QPixmap tmpPixmap = qpixmap.copy();
+    QPainter painter(&tmpPixmap);
+
+    painter.setPen(QPen(Qt::yellow, 2, Qt::SolidLine, Qt::RoundCap,
+                        Qt::RoundJoin));
+
+
+    Node *node = &graphNode[mousePoint.x()][mousePoint.y()];
+
+    while(node != NULL)
+    {
+        painter.drawPoint(QPoint(node->row,node->column));
+        node = node->prevNode;
+    }
+    ui->label->setPixmap(tmpPixmap);
+    statusBar()->showMessage(QString("drawMinPath%1,%2,%3").arg(wirePoints.size()).arg(seedPoints.size()).arg(node == NULL));
+
+}
+
+void ImageScissor::minPathEnable_drawMinPath(QPoint mousePoint)
+{
+    if(seedPoints.isEmpty() || !moveEnable || !minPathEnable)
+            return;
+
+    ui->label->setPixmap(minPath_qpixmap);
+    if(mousePoint.x() <= 0 ||mousePoint.y() <= 0 || !atImage(mousePoint))
+    {
+        ui->label->setPixmap(minPath_qpixmap);
+        return;
+    }
+
+    QPixmap tmpPixmap = minPath_qpixmap.copy();
+    QPainter painter(&tmpPixmap);
+
+    painter.setPen(QPen(Qt::red, 2, Qt::SolidLine, Qt::RoundCap,
+                        Qt::RoundJoin));
+
+    Node *node = &graphNode[mousePoint.x()][mousePoint.y()];
+    statusBar()->showMessage(QString("Mouse(%1,%2)*%3 = Node(%4,%5)").arg(mousePoint.x()).arg(mousePoint.y()).
+                             arg(scale_xy).arg(node->row).arg(node->column));
+
+    while(node != NULL)
+    {
+        painter.drawPoint(QPoint(int(node->row*3),int(node->column*3)));
+
+        if(node->prevNode != NULL)
+        {
+            int i = node->prevNode->row - node->row;
+            int j = node->prevNode->column - node->column;
+
+           //image.pixelColor(x,y).rgb());
+            painter.drawPoint(QPoint(node->row *3 + 1 + i, node->column *3 + 1 + j));
+            painter.drawPoint(QPoint(node->row *3 + 1 + 2 * i, node->column*3 + 1 + 2 * j));
+         }
+
+        node = node->prevNode;
+    }
+    ui->label->setPixmap(tmpPixmap);
+}
+
+//MOUSE EVENTS
+void ImageScissor::mousePressEvent(QMouseEvent *event)
+{
+    if (event->button() == Qt::LeftButton && scribbling) {
+        lastPoint = cursorSnap(event->pos());
+    }
+    /*
+    if(event->button() == Qt::LeftButton){
+        QPoint seed_pos = event->pos();
+        seed_x = seed_pos.x();//scale_xy;
+        seed_y = seed_pos.y();//scale_xy;
+        if(seed_x >= 0 && seed_x <= org_width && seed_y >= 0 && seed_y <= org_height){
+            scribbling = true;
+            if(seedPoints.isEmpty()){
+                work_mode = true;
+                lastPoint = cursorSnap(QWidget::mapFromGlobal(QCursor::pos()));
+            }
+            else{
+                //drawWithPrevNode(lastPoint);
+                lastPoint = cursorSnap(event->pos());
+            }
+            seedPoints.append(QPoint(lastPoint.x(), lastPoint.y()));
+            //int id = lastPoint.y()*org_width+lastPoint.x();
+            GetPath(seedPoints.last());
+            //statusBar()->showMessage(QString("%1").arg(seeds.size()));
+        }
+    }*/
+
+}
+
+void ImageScissor::mouseMoveEvent(QMouseEvent *event)
+{
+
+    if(Load_Image.isNull())
+    {
+        lastPoint = convert_position(event->pos());
+    }
+    else
+        lastPoint = cursorSnap(event->pos());
+
+    //drawMinPath(lastPoint);
+
+    if(!scribbling && !moveEnable)
+        selectContour();
+    else if(scribbling && !minPathEnable)
+    {
+        drawMinPath(lastPoint);
+    }
+    else if(moveEnable && minPathEnable)
+    {
+        minPathEnable_drawMinPath(lastPoint);
+    }
+    //drawMinPath(endPoint);
+    statusBar()->showMessage(QString("%1, %2").arg(event->pos().x()).arg(event->pos().y()));
+    //statusBar()->showMessage(QString("%2, %3").arg(event->pos().x()).arg(event->pos().y()));
+}
+
+void ImageScissor::keyPressEvent(QKeyEvent *event)
+{
+    if( event->key() == Qt::Key_Control && !debugEnable )
+    {
+       scribbling = true;
+       moveEnable = true;
+       finishCurrentContourSC->setEnabled(true);
+       finishCurrentContourCloseSC->setEnabled(true);
+       undoSC->setEnabled(true);
+
+    }
+}
+
+void ImageScissor::mouseReleaseEvent(QMouseEvent *event)
+{
+    if (event->button() == Qt::LeftButton && scribbling) {
+        if(!atImage(lastPoint))
+            return;
+        addFollowingSeedPoint();
+
+    }
+}
+
+void ImageScissor::computeCost(){
+    //declare var
+    int w = Load_Image.width();
+    int h = Load_Image.height();
+    //int id;
+    int rDR, gDR, bDR;
+    //double Derivative[8];
+    double max = 0;
+    //get rgb data
+    //cv::Mat rgb = qimage_to_mat_ref(image, QImage::Format_RGB32);
+    for(int y = 0; y < h; y++){
+        for(int x = 0; x < w; x++){
+            //initialize
+            //id = y * w + x;
+            //graphNode[x][y].column = y;
+            //graphNode[x][y].row = x;
+            //graphNode[x][y].state = 0;
+            if(y>=1 && x<(w-1) && y<(h-1)){
+                //D(link0)
+                rDR = abs((Load_Image.pixelColor(x,y-1).red()+  Load_Image.pixelColor(x+1,y-1).red())-  (Load_Image.pixelColor(x,y+1).red()+  Load_Image.pixelColor(x+1,y+1).red()))/4;
+                gDR = abs((Load_Image.pixelColor(x,y-1).green()+Load_Image.pixelColor(x+1,y-1).green())-(Load_Image.pixelColor(x,y+1).green()+Load_Image.pixelColor(x+1,y+1).green()))/4;
+                bDR = abs((Load_Image.pixelColor(x,y-1).blue()+ Load_Image.pixelColor(x+1,y-1).blue())- (Load_Image.pixelColor(x,y+1).blue()+ Load_Image.pixelColor(x+1,y+1).blue()))/4;
+                graphNode[x][y].linkCost[0] = sqrt((rDR*rDR+gDR*gDR+bDR*bDR)/3);
+
+            }
+            else{
+                graphNode[x][y].linkCost[0] = 0;
+            }
+            if(y>=1 && x<(w-1)){
+                //D(link1)
+                rDR = abs(Load_Image.pixelColor(x+1,y).red()-  Load_Image.pixelColor(x,y-1).red())/sqrt(2.0);
+                gDR = abs(Load_Image.pixelColor(x+1,y).green()-Load_Image.pixelColor(x,y-1).green())/sqrt(2.0);
+                bDR = abs(Load_Image.pixelColor(x+1,y).blue()- Load_Image.pixelColor(x,y-1).blue())/sqrt(2.0);
+                graphNode[x][y].linkCost[1] = sqrt((rDR*rDR+gDR*gDR+bDR*bDR)/3);
+            }
+            else{
+                graphNode[x][y].linkCost[1] = 0;
+            }
+            if(y>=1 && x>=1 && x<(w-1)){
+                //D(link2)
+                rDR = abs((Load_Image.pixelColor(x-1,y).red()+  Load_Image.pixelColor(x-1,y-1).red())-  (Load_Image.pixelColor(x+1,y).red()+  Load_Image.pixelColor(x+1,y-1).red()))/4;
+                gDR = abs((Load_Image.pixelColor(x-1,y).green()+Load_Image.pixelColor(x-1,y-1).green())-(Load_Image.pixelColor(x+1,y).green()+Load_Image.pixelColor(x+1,y-1).green()))/4;
+                bDR = abs((Load_Image.pixelColor(x-1,y).blue()+ Load_Image.pixelColor(x-1,y-1).blue())- (Load_Image.pixelColor(x+1,y).blue()+ Load_Image.pixelColor(x+1,y-1).blue()))/4;
+                graphNode[x][y].linkCost[2] = sqrt((rDR*rDR+gDR*gDR+bDR*bDR)/3);
+            }
+            else{
+                graphNode[x][y].linkCost[2] = 0;
+            }
+            if(y>=1 && x>=1){
+                //D(link3)
+                rDR = abs(Load_Image.pixelColor(x-1,y).red()-  Load_Image.pixelColor(x,y-1).red())/sqrt(2.0);
+                gDR = abs(Load_Image.pixelColor(x-1,y).green()-Load_Image.pixelColor(x,y-1).green())/sqrt(2.0);
+                bDR = abs(Load_Image.pixelColor(x-1,y).blue()- Load_Image.pixelColor(x,y-1).blue())/sqrt(2.0);
+                graphNode[x][y].linkCost[3] = sqrt((rDR*rDR+gDR*gDR+bDR*bDR)/3);
+            }
+            else{
+                graphNode[x][y].linkCost[3] = 0;
+            }
+            if(y>=1 && x>=1 && y<(h-1)){
+                //D(link4)
+                rDR = abs((Load_Image.pixelColor(x-1,y-1).red()+  Load_Image.pixelColor(x,y-1).red())-  (Load_Image.pixelColor(x,y+1).red()+  Load_Image.pixelColor(x-1,y+1).red()))/4;
+                gDR = abs((Load_Image.pixelColor(x-1,y-1).green()+Load_Image.pixelColor(x,y-1).green())-(Load_Image.pixelColor(x,y+1).green()+Load_Image.pixelColor(x-1,y+1).green()))/4;
+                bDR = abs((Load_Image.pixelColor(x-1,y-1).blue()+ Load_Image.pixelColor(x,y-1).blue())- (Load_Image.pixelColor(x,y+1).blue()+ Load_Image.pixelColor(x-1,y+1).blue()))/4;
+                graphNode[x][y].linkCost[4] = sqrt((rDR*rDR+gDR*gDR+bDR*bDR)/3);
+            }
+            else{
+                graphNode[x][y].linkCost[4] = 0;
+            }
+            if(x>=1 && y<(h-1)){
+                //D(link5)
+                rDR = abs(Load_Image.pixelColor(x-1,y).red()-  Load_Image.pixelColor(x,y+1).red())/sqrt(2.0);
+                gDR = abs(Load_Image.pixelColor(x-1,y).green()-Load_Image.pixelColor(x,y+1).green())/sqrt(2.0);
+                bDR = abs(Load_Image.pixelColor(x-1,y).blue()- Load_Image.pixelColor(x,y+1).blue())/sqrt(2.0);
+                graphNode[x][y].linkCost[5] = sqrt((rDR*rDR+gDR*gDR+bDR*bDR)/3);
+            }
+            else{
+                graphNode[x][y].linkCost[5] = 0;
+            }
+            if(x>=1 && y<(h-1) && x<(w-1)){
+                //D(link6)
+                rDR = abs((Load_Image.pixelColor(x-1,y+1).red()+  Load_Image.pixelColor(x-1,y).red())-  (Load_Image.pixelColor(x+1,y+1).red()+  Load_Image.pixelColor(x+1,y).red()))/4;
+                gDR = abs((Load_Image.pixelColor(x-1,y+1).green()+Load_Image.pixelColor(x-1,y).green())-(Load_Image.pixelColor(x+1,y+1).green()+Load_Image.pixelColor(x+1,y).green()))/4;
+                bDR = abs((Load_Image.pixelColor(x-1,y+1).blue()+ Load_Image.pixelColor(x-1,y).blue())- (Load_Image.pixelColor(x+1,y+1).blue()+ Load_Image.pixelColor(x+1,y).blue()))/4;
+                graphNode[x][y].linkCost[6] = sqrt((rDR*rDR+gDR*gDR+bDR*bDR)/3);
+            }
+            else{
+                graphNode[x][y].linkCost[6] = 0;
+            }
+            if(y<(h-1) && x<(w-1)){
+                //D(link7)
+                rDR = abs(Load_Image.pixelColor(x+1,y).red()-  Load_Image.pixelColor(x,y+1).red())/sqrt(2.0);
+                gDR = abs(Load_Image.pixelColor(x+1,y).green()-Load_Image.pixelColor(x,y+1).green())/sqrt(2.0);
+                bDR = abs(Load_Image.pixelColor(x+1,y).blue()- Load_Image.pixelColor(x,y+1).blue())/sqrt(2.0);
+                graphNode[x][y].linkCost[7] = sqrt((rDR*rDR+gDR*gDR+bDR*bDR)/3);
+            }
+            else{
+                graphNode[x][y].linkCost[7] = 0;
+            }
+
+            for(int i = 0;i < 8;i++)
+            {
+                if(graphNode[x][y].linkCost[i] > max)
+                    max = graphNode[x][y].linkCost[i];
+                if(graphNode[x][y].linkCost[i] > graphNode[x][y].maxDeriv)
+                    graphNode[x][y].maxDeriv = graphNode[x][y].linkCost[i];
+            }
+        }
+
+    }
+
+    for(int y = 0; y < h; y++){
+        for(int x = 0; x < w; x++){
+            for(int i = 0;i < 8;i++)
+            {
+                graphNode[x][y].linkCost[i] = (max - graphNode[x][y].linkCost[i]) * 1;
+                if(i%2 != 0)
+                    graphNode[x][y].linkCost[i] *= sqrt(2);
+            }
+        }
+    }
+
+}
+
+void ImageScissor::GetPath(QPoint st)
+{
+    costMax = 0;
+
+    for(int i = 0;i < Load_Image.width();i++)
+    {
+        for(int j = 0; j < Load_Image.height();j++)
+        {
+           graphNode[i][j].prevNode = NULL;
+           graphNode[i][j].state  = 0;
+           graphNode[i][j].totalCost = MAX;
+        }
+    }
+
+    graphNode[st.x()][st.y()].totalCost = 0.0;
+    graphNode[st.x()][st.y()].prevNode = NULL;
+    std::priority_queue<Node*, std::vector<Node*>, greaterNode> pq;
+    pq.push(&graphNode[st.x()][st.y()]);
+
+    while(!pq.empty()){
+        Node* a = pq.top();
+        pq.pop();
+        a->state = 2;
+        //a->totalCost = 0;
+        int a_x = a->row;
+        int a_y = a->column;
+        if(a->totalCost > costMax)
+            costMax = a->totalCost;
+
+        for(int i = 0; i < 8; i++){
+            //for each direction, get the offset in x and y
+            int off_x, off_y;
+            a->graph(off_x, off_y, i);
+            int new_x = a_x + off_x;
+            int new_y = a_y + off_y;
+            if (new_x < 0 || new_y  < 0){
+                continue;
+            }
+            int new_state = graphNode[new_x][new_y].state;
+            if (new_state == 0){
+                graphNode[new_x][new_y].prevNode= &graphNode[a_x][a_y];
+                graphNode[new_x][new_y].totalCost= graphNode[a_x][a_y].totalCost + graphNode[a_x][a_y].linkCost[i];
+                graphNode[new_x][new_y].state=1;
+                pq.push(&graphNode[new_x][new_y]);
+            }
+            else if(new_state == 1){
+                int current_cost = graphNode[a_x][a_y].totalCost + graphNode[a_x][a_y].linkCost[i];
+                if(current_cost < graphNode[new_x][new_y].totalCost){
+                    graphNode[new_x][new_y].prevNode = &graphNode[a_x][a_y];
+                    graphNode[a_x][a_y].totalCost = current_cost;
+                }
+            }
+        }
+    }
+}
+
+void ImageScissor::addFollowingSeedPoint()
+{
+    //endPoint = cursorSnap(event->pos());
+    if(Load_Image.isNull() || !scribbling)
+        return;
+
+    if(!atImage(lastPoint))
+        return;
+
+    Node *node = &graphNode[lastPoint.x()][lastPoint.y()];
+    if(seedPoints.isEmpty())
+    {
+        wirePoints.append(QPoint(lastPoint.x(), lastPoint.y()));
+        //drawLineWithNode();
+        //statusBar()->showMessage(QString("%1").arg(wirePoints.size()));
+    }
+    else
+    {
+        QPoint lastSeed = seedPoints.last();
+        QVector<QPoint> tmpVec;
+        while(node != NULL)
+        {
+            if(node->row == lastSeed.x() && node->column == lastSeed.y())
+            {
+                break;
+             }
+
+            tmpVec.prepend(QPoint(node->row,node->column));
+            node = node->prevNode;
+        }
+        wirePoints += tmpVec;
+    }
+    drawLineWithNode();
+    seedPoints.append(QPoint(lastPoint.x(),lastPoint.y()));
+    GetPath(seedPoints.last());
+    statusBar()->showMessage(QString("%1, %2").arg(wirePoints.size()).arg(seedPoints.size()));
 }
 
 QPoint ImageScissor::convert_position(QPoint point)
 {
+    QPoint converted_p = point;
+    converted_p /= scale_xy;
+    return converted_p;
+}
+
+QPoint ImageScissor::cursorSnap(QPoint point)
+{
     int range = 4;
-    QPoint converted_p = point;// - QPoint(15,15);
-    converted_p /= scale_xy;//QPoint(imageLabel->width(), imageLabel->height());
-    //point = imageLabel->mapFromGlobal(point) + QPoint(138,43);
-    //converted_p -= QPoint(15,15);
+    QPoint converted_p = point;
+    converted_p /= scale_xy;
+
     int newX = converted_p.x() - range;
     int newY = converted_p.y() - range;
-    int relocX, relocY;
+    int relocX = converted_p.x(), relocY = converted_p.y();
     double localMax = 0.0;
     for(int i = 0;i < range * 2 + 1;i++)
     {
@@ -436,13 +933,13 @@ QPoint ImageScissor::convert_position(QPoint point)
         {
             int tmpX = newX + i;
             int tmpY = newY + j;
-            int tmpid = tmpY * org_width + tmpX;
-            if(tmpX > 0
-              && tmpX < ui->label->pixmap()->width()
-              && tmpY > 0
-              && tmpY < ui->label->pixmap()->height()){
-                if(localMax < graphNode[tmpid]->maxDeriv){
-                    localMax = graphNode[tmpid]->maxDeriv;
+
+            //make sure mouse location is not at the edge of the picture;
+            if(atImage(QPoint(tmpX,tmpY)))
+            {
+                if(localMax < graphNode[tmpX][tmpY].maxDeriv)
+                {
+                    localMax = graphNode[tmpX][tmpY].maxDeriv;
                     relocX = tmpX;
                     relocY = tmpY;
                 }
@@ -451,129 +948,246 @@ QPoint ImageScissor::convert_position(QPoint point)
         }
     }
 
+    if(relocX == 0)
+        relocX += 1;
+    else if(relocX == ui->label->pixmap()->height() - 1)
+        relocX -= 1;
+
+    if(relocY == 0)
+        relocY += 1;
+    else if(relocY == ui->label->pixmap()->height() - 1)
+        relocY -= 1;
+
     converted_p = QPoint(relocX,relocY);
     return converted_p;
 }
 
-//MOUSE EVENTS
-void ImageScissor::mousePressEvent(QMouseEvent *event)
+void ImageScissor::drawLineWithNode()
 {
+    QPainter painter(&qpixmap);
 
-    if(event->button() == Qt::LeftButton && work_mode){
-        QPoint seed_pos = event->pos();
-        seed_x = seed_pos.x()/scale_xy;
-        seed_y = seed_pos.y()/scale_xy;
-        if(seed_x >= 0 && seed_x <= org_width && seed_y >= 0 && seed_y <= org_height){
-            scribbling = true;
-            if(seeds.isEmpty()){
-                seeds.append(seed_pos);
-            }
-            else{
-                int id = lastPoint.y()*org_width+lastPoint.x();
-                //GetPath(id, graphNode, org_width , org_height);
-                drawWithPrevNode(graphNode[seed_y*org_width+seed_x]);
-                seeds.append(seed_pos);
-            }
-            lastPoint = seed_pos;
-            statusBar()->showMessage(QString("%1").arg(seeds.size()));
+    for(int i = 0;i < wirePointsVector.size();i++)
+    {
+
+        if(i == selectedContour)
+        {
+            painter.setPen(QPen(Qt::red, 2, Qt::SolidLine, Qt::RoundCap,
+                                Qt::RoundJoin));
+        }
+        else
+        {
+            painter.setPen(QPen(Qt::green, 2, Qt::SolidLine, Qt::RoundCap,
+                                Qt::RoundJoin));
+        }
+
+        for(int j = wirePointsVector.at(i).size() - 1;j >= 0;j--)
+        {
+            painter.drawPoint(wirePointsVector.at(i).at(j));
+            //if(seedPoints.size() > 1 && wirePoints.at(i) == seedPoints.at(seedPoints.size() - 2))
+                //break;
         }
     }
 
+    painter.setPen(QPen(Qt::red, 2, Qt::SolidLine, Qt::RoundCap,
+                        Qt::RoundJoin));
+    for(int j = wirePoints.size() - 1;j >= 0;j--)
+    {
+        painter.drawPoint(wirePoints.at(j));
+        //if(seedPoints.size() > 1 && wirePoints.at(i) == seedPoints.at(seedPoints.size() - 2))
+            //break;
+    }
+    ui->label->setPixmap(qpixmap);
 }
 
-void ImageScissor::mouseMoveEvent(QMouseEvent *event)
+bool ImageScissor::atImage(QPoint point)
 {
-    /* EXAMPLE:
-     * if((event->buttons() & Qt::LeftButton) && scribbling){
-        drawLineTo(event->pos());
-    }
-    */
-    //QPoint curr_pos = convert_position(event->pos());
-    //my_x = curr_pos.x();
-    //my_y = curr_pos.y();
-    //int id = my_y*org_height + my_x;
-    statusBar()->showMessage(QString("%1, %2").arg(event->pos().x()).arg(event->pos().y()));
+    int tmpX = point.x();
+    int tmpY = point.y();
+
+    if(tmpX >= 0
+      && tmpX < ui->label->pixmap()->width()
+      && tmpY >= 0
+      && tmpY < ui->label->pixmap()->height())
+        return true;
+    else
+        return false;
 }
 
-void ImageScissor::mouseReleaseEvent(QMouseEvent *event)
-{
-    //statusBar()->showMessage(QString("%1, %2, %3").arg("prev_id").arg(event->button()==Qt::LeftButton).arg(work_mode));
-    if(event->button() == Qt::LeftButton && work_mode){
-        //statusBar()->showMessage(QString("%1").arg(100));
-
-        QPoint curr_pos = event->pos();
-        int id = curr_pos.y() * org_width + curr_pos.x();
-        int prev_id = lastPoint.y() * org_width + lastPoint.x();
-        statusBar()->showMessage(QString("%1, %2").arg(prev_id).arg(id));
-        //GetPath(prev_id, graphNode, org_width , org_height);
-        //drawWithPrevNode(graphNode[id]);
-
+//Edit Contour
+void ImageScissor::selectContour(){
+    if(scribbling && moveEnable)
+    {
+        selectedContour = -1;
+        return;
     }
-}
-
-/*
-void ImageScissor::paintEvent(QPaintEvent *event)
-{
-    //QLabel::paintEvent(event);
-    if(work_mode){
-        Contour_Image = Load_Image;
-        QPainter painter(&Contour_Image);
-        QRect dirtyRect = event->rect();
-        painter.drawImage(dirtyRect, Contour_Image, dirtyRect);
-        ui->label->setPixmap(QPixmap::fromImage(Contour_Image));
-        update();
+    if(wirePointsVector.isEmpty())
+    {
+        selectedContour = -1;
+        return;
     }
-
-}*/
-
-void ImageScissor::GetPath(int st, std::vector<Node*> &nodes, int w, int h)
-{
-    //starting point
-    statusBar()->showMessage(QString("starting id %1, queue size %2").arg(st));
-    nodes[st]->totalCost = 0;
-    nodes[st]->prevNode = NULL;
-    std::priority_queue<Node*, std::vector<Node*>, greaterNode> pq;
-    pq.push(nodes[st]);
-    statusBar()->showMessage(QString("starting id %1, queue size %2").arg(st).arg(pq.size()));
-
-    while(!pq.empty()){
-        Node *a = pq.top();
-        pq.pop();
-        a->state = 2;
-        int a_x = a->column;
-        int a_y = a->row;
-        int idx = a_y*w + a_x;
-        for(int i = 0; i < 8; i++){
-            //for each direction, get the offset in x and y
-            int off_x, off_y, new_idx;
-            a->graph(off_x, off_y, i);
-            int new_x = a_x + off_x;
-            int new_y = a_y + off_y;
-            if (new_x >= 0 && new_y >=0 && new_x <= w && new_y <= h){
-                    new_idx = new_y*w + new_x;
-            }
-            else{
-                continue;
-            }
-            int new_state = nodes[new_idx]->state;
-            if (new_state == 0){
-                nodes[new_idx]->prevNode=nodes[idx];
-                nodes[new_idx]->totalCost=nodes[idx]->totalCost+nodes[idx]->linkCost[i];
-                nodes[new_idx]->state=1;
-                pq.push(nodes[new_idx]);
-                statusBar()->showMessage(QString("starting id %1, queue size %2").arg(st).arg(pq.size()));
-            }
-            else if(new_state == 1){
-                int current_cost = nodes[idx]->totalCost+nodes[idx]->linkCost[i];
-                if(current_cost < nodes[new_idx]->totalCost){
-                    nodes[new_idx]->prevNode = nodes[idx];
-                    nodes[idx]->totalCost = current_cost;
-                }
+    for(int i = 0;i < wirePointsVector.size();i++)
+    {
+        for(int j = 0;j < wirePointsVector.at(i).size();j++)
+        {
+            QPoint tmpPoint = wirePointsVector.at(i).at(j) - lastPoint;
+            if((tmpPoint.x() * tmpPoint.x() + tmpPoint.y() * tmpPoint.y()) <= 4)
+            {
+                selectedContour = i;
+                return;
             }
         }
     }
+    drawLineWithNode();
 }
 
+void ImageScissor::finishCurrentContour()
+{
+    if(seedPoints.isEmpty() || !moveEnable || !scribbling)
+        return;
+    lastPoint = seedPoints.first();
+    addFollowingSeedPoint();
 
+    QVector<QPoint> tmpVec;
+    for(int i = 0;i < wirePoints.size();i++)
+    {
+        QPoint tmpPoint = wirePoints.at(i);
+        tmpVec.append(QPoint(tmpPoint.x(),tmpPoint.y()));
+    }
+    if(!tmpVec.isEmpty())
+    {
+        wirePointsVector.append(tmpVec);
+    }
 
+    wirePoints.clear();
+    seedPoints.clear();
+    scribbling = false;
+    moveEnable = false;
+    ui->label->setPixmap(qpixmap);
+    update();
+}
 
+void ImageScissor::undo(){
+
+    if(!scribbling && !moveEnable && selectedContour >= 0)
+    {
+        wirePointsVector.remove(selectedContour);
+        selectedContour = -1;
+    }
+    else
+    {
+        if(seedPoints.isEmpty())
+            return;
+        seedPoints.pop_back();
+        wirePoints.pop_back();
+
+        if(!seedPoints.isEmpty())
+        {
+            while((wirePoints.last() != seedPoints.last()  && !(wirePoints.isEmpty())))
+            {
+                wirePoints.pop_back();
+                //statusBar()->showMessage(QString("%1,%2").arg(wirePoints.size()).arg(seedPoints.size()));
+                //statusBar()->showMessage(QString("%1,%2,%3,%4").arg(lastSeed.x()).arg(lastWirePoint.x()).arg(lastSeed.y()).arg(lastWirePoint.y()));
+            }
+        }
+
+        if(seedPoints.size() == 1)
+        {
+                  wirePoints.pop_back();
+                  seedPoints.clear();
+        }
+
+        if(!seedPoints.isEmpty())
+            GetPath(seedPoints.last());
+    }
+    qpixmap = QPixmap::fromImage(Load_Image);
+    drawLineWithNode();
+    statusBar()->showMessage(QString("%1,%2").arg(wirePoints.size()).arg(seedPoints.size()));
+}
+
+QImage ImageScissor::blurred(const QImage& image, const QRect& rect, int radius, bool alphaOnly)
+{
+    int tab[] = { 14, 10, 8, 6, 5, 5, 4, 3, 3, 3, 3, 2, 2, 2, 2, 2, 2 };
+    int alpha = (radius < 1)  ? 16 : (radius > 17) ? 1 : tab[radius-1];
+
+    QImage result = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    int r1 = rect.top();
+    int r2 = rect.bottom();
+    int c1 = rect.left();
+    int c2 = rect.right();
+
+    int bpl = result.bytesPerLine();
+    int rgba[4];
+    unsigned char* p;
+
+    int i1 = 0;
+    int i2 = 3;
+
+    if (alphaOnly)
+        i1 = i2 = (QSysInfo::ByteOrder == QSysInfo::BigEndian ? 0 : 3);
+
+    for (int col = c1; col <= c2; col++) {
+        p = result.scanLine(r1) + col * 4;
+        for (int i = i1; i <= i2; i++)
+            rgba[i] = p[i] << 4;
+
+        p += bpl;
+        for (int j = r1; j < r2; j++, p += bpl)
+            for (int i = i1; i <= i2; i++)
+                p[i] = (rgba[i] += ((p[i] << 4) - rgba[i]) * alpha / 16) >> 4;
+    }
+
+    for (int row = r1; row <= r2; row++) {
+        p = result.scanLine(row) + c1 * 4;
+        for (int i = i1; i <= i2; i++)
+            rgba[i] = p[i] << 4;
+
+        p += 4;
+        for (int j = c1; j < c2; j++, p += 4)
+            for (int i = i1; i <= i2; i++)
+                p[i] = (rgba[i] += ((p[i] << 4) - rgba[i]) * alpha / 16) >> 4;
+    }
+
+    for (int col = c1; col <= c2; col++) {
+        p = result.scanLine(r2) + col * 4;
+        for (int i = i1; i <= i2; i++)
+            rgba[i] = p[i] << 4;
+
+        p -= bpl;
+        for (int j = r1; j < r2; j++, p -= bpl)
+            for (int i = i1; i <= i2; i++)
+                p[i] = (rgba[i] += ((p[i] << 4) - rgba[i]) * alpha / 16) >> 4;
+    }
+
+    for (int row = r1; row <= r2; row++) {
+        p = result.scanLine(row) + c2 * 4;
+        for (int i = i1; i <= i2; i++)
+            rgba[i] = p[i] << 4;
+
+        p -= 4;
+        for (int j = c1; j < c2; j++, p -= 4)
+            for (int i = i1; i <= i2; i++)
+                p[i] = (rgba[i] += ((p[i] << 4) - rgba[i]) * alpha / 16) >> 4;
+    }
+
+    return result;
+}
+
+void ImageScissor::on_actionOrigin_triggered()
+{
+    setImage(blur0);
+}
+
+void ImageScissor::on_actionBlur_1_2_triggered()
+{
+    setImage(blur2);
+}
+
+void ImageScissor::on_actionBlur_1_4_triggered()
+{
+    setImage(blur4);
+}
+
+void ImageScissor::on_actionBlur_1_8_triggered()
+{
+    setImage(blur8);
+}

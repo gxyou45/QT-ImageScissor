@@ -26,12 +26,10 @@ INCLUDEPATH += /usr/local/Cellar/opencv/3.4.0_1/include
 SOURCES += \
         main.cpp \
         imagescissor.cpp \
-    imagelabel.cpp \
     imagenode.cpp
 
 HEADERS += \
         imagescissor.h \
-    imagelabel.h \
     imagenode.h
 
 FORMS += \

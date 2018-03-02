@@ -8,14 +8,7 @@ ImageNode::ImageNode()
 
 }
 
-struct greaterNode
-{
-    bool operator() (Node *a, Node *b)
-    {
-        return a->totalCost > b->totalCost;
-    }
-};
-
+/*
 void ImageNode::GetPath(int st, std::vector<Node*> &nodes, int w, int h)
 {
     //starting point
@@ -59,6 +52,7 @@ void ImageNode::GetPath(int st, std::vector<Node*> &nodes, int w, int h)
         }
     }
 }
+*/
 
 QVector<QPoint> ImageNode::DrawPath(int x, int y, std::vector<Node*> &nodes, int w)
 {

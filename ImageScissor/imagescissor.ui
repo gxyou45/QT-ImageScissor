@@ -51,7 +51,7 @@
       <bool>true</bool>
      </property>
      <property name="autoFillBackground">
-      <bool>false</bool>
+      <bool>true</bool>
      </property>
      <widget class="QLabel" name="label">
       <property name="geometry">
@@ -123,11 +123,21 @@
     <addaction name="actionImage_Only"/>
     <addaction name="actionImage_with_Contour"/>
    </widget>
+   <widget class="QMenu" name="menuBlur">
+    <property name="title">
+     <string>Blur</string>
+    </property>
+    <addaction name="actionOrigin"/>
+    <addaction name="actionBlur_1_2"/>
+    <addaction name="actionBlur_1_4"/>
+    <addaction name="actionBlur_1_8"/>
+   </widget>
    <addaction name="menuImage_Scissor"/>
    <addaction name="menuFile"/>
    <addaction name="menuDebug"/>
    <addaction name="menuWork"/>
    <addaction name="menuEdit"/>
+   <addaction name="menuBlur"/>
   </widget>
   <widget class="QToolBar" name="mainToolBar">
    <attribute name="toolBarArea">
@@ -237,6 +247,26 @@
   <action name="actionImage_with_Contour">
    <property name="text">
     <string>Image with Contour</string>
+   </property>
+  </action>
+  <action name="actionOrigin">
+   <property name="text">
+    <string>Origin</string>
+   </property>
+  </action>
+  <action name="actionBlur_1_2">
+   <property name="text">
+    <string>Blur_1_2</string>
+   </property>
+  </action>
+  <action name="actionBlur_1_4">
+   <property name="text">
+    <string>Blur_1_4</string>
+   </property>
+  </action>
+  <action name="actionBlur_1_8">
+   <property name="text">
+    <string>Blur_1_8</string>
    </property>
   </action>
  </widget>

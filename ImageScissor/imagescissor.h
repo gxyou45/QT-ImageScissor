@@ -19,6 +19,7 @@
 //#include <QGridLayout>
 #include <math.h>
 #include <QtGui>
+#include <QShortcut>
 
 namespace Ui {
 class ImageScissor;
@@ -54,56 +55,95 @@ private slots:
 
     void on_actionPath_Tree_triggered();
 
+    void on_actionMin_Path_triggered();
+
+    void on_actionOrigin_triggered();
+
+    void on_actionBlur_1_2_triggered();
+
+    void on_actionBlur_1_4_triggered();
+
+    void on_actionBlur_1_8_triggered();
+
 private:
     Ui::ImageScissor *ui;
     QImage Load_Image;
     int org_width;
     int org_height;
+
     QImage Contour_Image;
     QImage Pixel_Image;
     QImage Cost_Image;
+
+    QImage blur0;
+    QImage blur2;
+    QImage blur4;
+    QImage blur8;
+
     QPixmap qpixmap;
+    QPixmap minPath_qpixmap;
     double scale_xy;
     bool work_mode;
 
-    //testing
+
     bool scribbling;
-    int myPenWidth;
-    QColor myPenColor;
+    bool moveEnable;
+    bool minPathEnable;
+    bool debugEnable;
+
     QPoint lastPoint;
 
-    std::vector<QColor> rgbImage;
-    std::vector<Node*> graphNode;
+    //std::vector<Node*> graphNode;
 
     ImageNode *my_shortPath;
     int my_x;
     int my_y;
     int seed_x;
     int seed_y;
-    QVector<QPoint> seeds;
-    QVector<QPoint> wirepoints;
+    int selectedContour;
+
+    QVector<QPoint> seedPoints;//on scissoring curve
+    QVector<QPoint> wirePoints;//on scissoring curve
+    QVector<QVector<QPoint>> wirePointsVector; //saved curve
 
     bool pathTreeMode;
+
+    void setImage(const QImage &newImage);
+    void scaleImage(double factor);
 
     void adjustScrollBar(QScrollBar *scrollBar, double factor);
     void getPixelNode();
     void getCostGraph();
-    void getPathTree(int x, int y);
+    void getPathTree();
     void getMinPath();
-    void computeCost(QImage image);
+    void computeCost();
 
-    void setPenColor(const QColor &newcolor);
-    void setPenWidth(int newWidth);
     void drawLineTo_example(const QPoint &endPoint);
-    void drawWithPrevNode(Node* node);
+    void drawWithPrevNode(QPoint mousePoint);
+    void drawMinPath(QPoint mousePoint);
+    void minPathEnable_drawMinPath(QPoint mousePoint);
     QPoint convert_position(QPoint point);
-    void GetPath(int st, std::vector<Node*> &nodes, int w, int h);
+    QPoint cursorSnap(QPoint point);
+    bool atImage(QPoint point);
+    void GetPath(QPoint st);
+    void drawLineWithNode();
+    void addFollowingSeedPoint();
+    void selectContour();
+    void finishCurrentContour();
+    void undo();
+    void delay();
+    QImage blurred(const QImage& image, const QRect& rect, int radius, bool alphaOnly);
+
+    QShortcut *finishCurrentContourSC;
+    QShortcut *finishCurrentContourCloseSC;
+    QShortcut *undoSC;
 
 protected:
     //void paintEvent(QPaintEvent *event);
     void mousePressEvent(QMouseEvent *event);
     void mouseMoveEvent(QMouseEvent *event);
     void mouseReleaseEvent(QMouseEvent *event);
+    void keyPressEvent(QKeyEvent *event);
 
 };
 
