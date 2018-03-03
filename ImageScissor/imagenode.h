@@ -78,7 +78,6 @@ class ImageNode
 {
 public:
     ImageNode();
-    //void GetPath(int st, std::vector<Node*> &nodes, int w, int h);
     QVector<QPoint> DrawPath(int x, int y, std::vector<Node*> &nodes, int w);
 };
 

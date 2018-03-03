@@ -36,8 +36,6 @@ ImageScissor::ImageScissor(QWidget *parent) :
     ui->label->setMouseTracking(true);
 
     ui->scrollArea->setBackgroundRole((QPalette::Dark)); 
-    //ui->scrollArea->setWidget(ui->label);
-    //ui->scrollArea->setVisible(false);
     ui->scrollArea->setMouseTracking(true);
 
     scale_xy = 1;
@@ -58,6 +56,9 @@ ImageScissor::~ImageScissor()
 void ImageScissor::setImage(const QImage &newImage)
 {
     Load_Image = newImage;
+    Contour_Image = newImage.copy();
+    org_width = newImage.width();
+    org_height = newImage.height();
     qpixmap = QPixmap::fromImage(Load_Image);
     ui->label->setPixmap(qpixmap);
 
@@ -66,13 +67,7 @@ void ImageScissor::setImage(const QImage &newImage)
 
     scale_xy = 1.0;
 
-    //ui->scrollArea->setVisible(true);
     ui->label->setVisible(true);
-
-    //fitToWindowAct->setEnabled(true);
-    //updateActions();
-    //if (!fitToWindowAct->isChecked())
-    //    imageLabel->adjustSize();
 
     double factor = 400.0/Load_Image.width();
     scaleImage(factor);
@@ -106,10 +101,7 @@ void ImageScissor::on_actionOpen_triggered()
             QMessageBox::warning(this,"..","Failed to load image.");
             return;
         }
-        //Load_Image = Loaded_Image.copy();
-        Contour_Image = Loaded_Image.copy();
-        org_width = Loaded_Image.width();
-        org_height = Loaded_Image.height();
+
 
         initialGraphNode(&Loaded_Image);
         blur0 = Loaded_Image;
@@ -168,7 +160,6 @@ void ImageScissor::on_actionScissor_Stop_triggered()
     ui->actionScissor_Start->setEnabled(true);
     ui->actionScissor_Stop->setDisabled(true);
     ui->actionScissor_Undo->setEnabled(true);
-
     finishCurrentContour();
 }
 
@@ -177,7 +168,6 @@ void ImageScissor::on_actionScissor_Undo_triggered()
     ui->actionScissor_Start->setEnabled(true);
     ui->actionScissor_Stop->setEnabled(true);
     ui->actionScissor_Undo->setDisabled(true);
-
     undo();
 }
 
@@ -188,8 +178,7 @@ void ImageScissor::on_actionSave_Contour_triggered()
     QString fileName = QFileDialog::getSaveFileName(this,"Save",QDir::currentPath(),"JPG-Files (*.jpg)");
     if (!fileName.isEmpty()) {
          if (tmp.isNull()) {
-             QMessageBox::information(this, tr("Error"),
-                                      tr("Please Load an Image First!"));
+             QMessageBox::information(this, tr("Error"), tr("Please Load an Image First!"));
              return;
          }
         tmp.save(fileName);
@@ -220,31 +209,24 @@ void ImageScissor::on_actionSave_Mask_triggered()
         }
     }
 
-    for(int i = 0;i < wirePointsVector.size();i++)
-    {
-        for(int j = wirePointsVector.at(i).size() - 1;j >= 0;j--)
-        {
+    for(int i = 0;i < wirePointsVector.size();i++){
+        for(int j = wirePointsVector.at(i).size() - 1;j >= 0;j--){
             maskMatrix[wirePointsVector.at(i).at(j).y() * tmpWidth + wirePointsVector.at(i).at(j).x()] = true;
-            //if(seedPoints.size() > 1 && wirePoints.at(i) == seedPoints.at(seedPoints.size() - 2))
-                //break;
         }
     }
 
     QVector<QPoint> expandMaskVec;
     expandMaskVec.append(QPoint(0,0));
-    //maskMatrix[0] = true;
-    while(!expandMaskVec.isEmpty())
-    {
+
+    while(!expandMaskVec.isEmpty()){
         QPoint point = expandMaskVec.last();
         expandMaskVec.pop_back();
         int tmpX = point.x();
         int tmpY = point.y();
 
-        if(tmpX >= 0 && tmpX <= tmpWidth && tmpY >= 0 && tmpY <= tmpHeight)
-        {
+        if(tmpX >= 0 && tmpX <= tmpWidth && tmpY >= 0 && tmpY <= tmpHeight){
             int index = tmpY * tmpWidth + tmpX;
-            if(!maskMatrix[index])
-            {
+            if(!maskMatrix[index]){
                 maskMatrix[index] = true;
                 expandMaskVec.append(QPoint(tmpX - 1,tmpY));
                 expandMaskVec.append(QPoint(tmpX + 1,tmpY));
@@ -254,10 +236,8 @@ void ImageScissor::on_actionSave_Mask_triggered()
         }
     }
 
-    for(int i = 0;i < tmpWidth * tmpHeight;i++)
-    {
-        if(!maskMatrix[i])
-        {
+    for(int i = 0;i < tmpWidth * tmpHeight;i++){
+        if(!maskMatrix[i]){
             int x = i % tmpWidth;
             int y = (int)(i / tmpWidth);
             QPoint tmpP(x,y);
@@ -269,8 +249,8 @@ void ImageScissor::on_actionSave_Mask_triggered()
     ui->label->setPixmap(QPixmap::fromImage(tmp));
 
     QString fileName = QFileDialog::getSaveFileName(this,"Save",QDir::currentPath(),"JPG-Files (*.jpg)");
-    if (!fileName.isEmpty()) {
-         if (tmp.isNull()) {
+    if (!fileName.isEmpty()){
+         if (tmp.isNull()){
              QMessageBox::information(this, tr("Error"),
                                       tr("Please Load an Image First!"));
              return;
@@ -298,13 +278,11 @@ void ImageScissor::getPixelNode()
     int width = curr_width * 3;
     int height = curr_height * 3;
 
-    //QSize newSize(width, height);
     QImage tmp(width, height, QImage::Format_RGB32);
 
     tmp.fill(Qt::black);
     for(int x = 0; x < curr_width; x++){
         for(int y = 0; y < curr_height; y++){
-            //QPoint b(x*3, y*3);
             tmp.setPixel(x*3+1, y*3+1, Load_Image.pixel(x, y));
         }
     }
@@ -314,7 +292,6 @@ void ImageScissor::getPixelNode()
 void ImageScissor::on_actionPixel_Node_triggered()
 {
     work_mode = false;
-    //METHOD1
     getPixelNode();
     ui->label->setPixmap(QPixmap::fromImage(Pixel_Image));
     update();
@@ -325,40 +302,37 @@ void ImageScissor::getCostGraph(){
     int curr_height = Load_Image.height();
     int width = curr_width * 3;
     int height = curr_height * 3;
-    int value, id;
+    int value;
 
-    //QSize newSize(width, height);
     QImage tmp(width, height, QImage::Format_RGB32);
     tmp.fill(Qt::white);
     for(int y = 0; y < curr_height; y++){
         for(int x = 0; x < curr_width; x++){
-            //QPoint b(x*3, y*3);
-            id = y * curr_width + x;
-            //value = qGray(Load_Image.pixel(x, y));
+
             tmp.setPixel(x*3+1, y*3+1, Load_Image.pixel(x, y));
 
-            value = std::min<unsigned long>(graphNode[id]->linkCost[3], 255);
+            value = std::min<unsigned long>(graphNode[x][y].linkCost[3], 255);
             tmp.setPixel(x*3,   y*3,   QColor(value, value, value).rgb());
 
-            value = std::min<unsigned long>(graphNode[id]->linkCost[2], 255);
+            value = std::min<unsigned long>(graphNode[x][y].linkCost[2], 255);
             tmp.setPixel(x*3+1, y*3,   QColor(value, value, value).rgb());
 
-            value = std::min<unsigned long>(graphNode[id]->linkCost[1], 255);
+            value = std::min<unsigned long>(graphNode[x][y].linkCost[1], 255);
             tmp.setPixel(x*3+2, y*3,   QColor(value, value, value).rgb());
 
-            value = std::min<unsigned long>(graphNode[id]->linkCost[4], 255);
+            value = std::min<unsigned long>(graphNode[x][y].linkCost[4], 255);
             tmp.setPixel(x*3,   y*3+1, QColor(value, value, value).rgb());
 
-            value = std::min<unsigned long>(graphNode[id]->linkCost[0], 255);
+            value = std::min<unsigned long>(graphNode[x][y].linkCost[0], 255);
             tmp.setPixel(x*3+2, y*3+1, QColor(value, value, value).rgb());
 
-            value = std::min<unsigned long>(graphNode[id]->linkCost[5], 255);
+            value = std::min<unsigned long>(graphNode[x][y].linkCost[5], 255);
             tmp.setPixel(x*3,   y*3+2, QColor(value, value, value).rgb());
 
-            value = std::min<unsigned long>(graphNode[id]->linkCost[6], 255);
+            value = std::min<unsigned long>(graphNode[x][y].linkCost[6], 255);
             tmp.setPixel(x*3+1, y*3+2, QColor(value, value, value).rgb());
 
-            value = std::min<unsigned long>(graphNode[id]->linkCost[7], 255);
+            value = std::min<unsigned long>(graphNode[x][y].linkCost[7], 255);
             tmp.setPixel(x*3+2, y*3+2, QColor(value, value, value).rgb());
         }
     }
@@ -412,7 +386,6 @@ void ImageScissor::getPathTree(){
             int i = graphNode[a_x][a_y].prevNode->row - graphNode[a_x][a_y].row;
             int j = graphNode[a_x][a_y].prevNode->column - graphNode[a_x][a_y].column;
 
-           //image.pixelColor(x,y).rgb());
             tmp.setPixel(3 * a_x + 1 + i, 3 * a_y + 1 + j, QColor(value, value,0).rgb());
             tmp.setPixel(3 * a_x + 1 + 2 * i, 3 * a_y + 1 + 2 * j, QColor(value, value,0).rgb());
          }
@@ -423,7 +396,6 @@ void ImageScissor::getPathTree(){
         }
     }
 
-    //QSize tmpSize = imageLabel->pixmap()->size();
     ui->label->setPixmap(QPixmap::fromImage(tmp));
 }
 
@@ -444,7 +416,6 @@ void ImageScissor::getMinPath(){
     debugEnable = true;
     minPathEnable = true;
 
-    //show path tree
     if(seedPoints.isEmpty())
         return;
     GetPath(seedPoints.last());
@@ -475,7 +446,6 @@ void ImageScissor::getMinPath(){
             int i = graphNode[a_x][a_y].prevNode->row - graphNode[a_x][a_y].row;
             int j = graphNode[a_x][a_y].prevNode->column - graphNode[a_x][a_y].column;
 
-           //image.pixelColor(x,y).rgb());
             tmp.setPixel(3 * a_x + 1 + i, 3 * a_y + 1 + j, QColor(value, value,0).rgb());
             tmp.setPixel(3 * a_x + 1 + 2 * i, 3 * a_y + 1 + 2 * j, QColor(value, value,0).rgb());
          }
@@ -498,25 +468,6 @@ void ImageScissor::on_actionImage_Only_triggered()
     update();
 }
 
-//TEST: DRAW LINES
-/*
-void ImageScissor::drawLineTo_example(const QPoint &endPoint)
-{
-    QPainter painter(&Load_Image);
-    lastPoint = seedPoints.last();
-    painter.setPen(QPen(myPenColor, myPenWidth, Qt::SolidLine, Qt::RoundCap,
-                        Qt::RoundJoin));
-    painter.drawLine(lastPoint, endPoint);
-    //modified = true;
-
-    //int rad = (myPenWidth / 2) + 2;
-    //update(QRect(lastPoint, endPoint).normalized()
-    //                                 .adjusted(-rad, -rad, +rad, +rad));
-    lastPoint = endPoint;
-    update();
-
-}*/
-
 //DRAW NODE
 void ImageScissor::drawWithPrevNode(QPoint mousePoint)
 {
@@ -538,7 +489,6 @@ void ImageScissor::drawWithPrevNode(QPoint mousePoint)
         node = node->prevNode;
     }
     ui->label->setPixmap(QPixmap::fromImage(tmpImage));
-    //update();
 }
 
 void ImageScissor::drawMinPath(QPoint mousePoint){
@@ -548,10 +498,7 @@ void ImageScissor::drawMinPath(QPoint mousePoint){
 
     ui->label->setPixmap(qpixmap);
     if(mousePoint.x() <= 0 ||mousePoint.y() <= 0 || !atImage(mousePoint))
-    {
-        //ui->label->setPixmap(qpixmap);
         return;
-    }
 
     QPixmap tmpPixmap = qpixmap.copy();
     QPainter painter(&tmpPixmap);
@@ -603,7 +550,6 @@ void ImageScissor::minPathEnable_drawMinPath(QPoint mousePoint)
             int i = node->prevNode->row - node->row;
             int j = node->prevNode->column - node->column;
 
-           //image.pixelColor(x,y).rgb());
             painter.drawPoint(QPoint(node->row *3 + 1 + i, node->column *3 + 1 + j));
             painter.drawPoint(QPoint(node->row *3 + 1 + 2 * i, node->column*3 + 1 + 2 * j));
          }
@@ -616,30 +562,8 @@ void ImageScissor::minPathEnable_drawMinPath(QPoint mousePoint)
 //MOUSE EVENTS
 void ImageScissor::mousePressEvent(QMouseEvent *event)
 {
-    if (event->button() == Qt::LeftButton && scribbling) {
+    if (event->button() == Qt::LeftButton && scribbling)
         lastPoint = cursorSnap(event->pos());
-    }
-    /*
-    if(event->button() == Qt::LeftButton){
-        QPoint seed_pos = event->pos();
-        seed_x = seed_pos.x();//scale_xy;
-        seed_y = seed_pos.y();//scale_xy;
-        if(seed_x >= 0 && seed_x <= org_width && seed_y >= 0 && seed_y <= org_height){
-            scribbling = true;
-            if(seedPoints.isEmpty()){
-                work_mode = true;
-                lastPoint = cursorSnap(QWidget::mapFromGlobal(QCursor::pos()));
-            }
-            else{
-                //drawWithPrevNode(lastPoint);
-                lastPoint = cursorSnap(event->pos());
-            }
-            seedPoints.append(QPoint(lastPoint.x(), lastPoint.y()));
-            //int id = lastPoint.y()*org_width+lastPoint.x();
-            GetPath(seedPoints.last());
-            //statusBar()->showMessage(QString("%1").arg(seeds.size()));
-        }
-    }*/
 
 }
 
@@ -647,33 +571,23 @@ void ImageScissor::mouseMoveEvent(QMouseEvent *event)
 {
 
     if(Load_Image.isNull())
-    {
         lastPoint = convert_position(event->pos());
-    }
     else
         lastPoint = cursorSnap(event->pos());
-
-    //drawMinPath(lastPoint);
 
     if(!scribbling && !moveEnable)
         selectContour();
     else if(scribbling && !minPathEnable)
-    {
         drawMinPath(lastPoint);
-    }
     else if(moveEnable && minPathEnable)
-    {
         minPathEnable_drawMinPath(lastPoint);
-    }
-    //drawMinPath(endPoint);
+
     statusBar()->showMessage(QString("%1, %2").arg(event->pos().x()).arg(event->pos().y()));
-    //statusBar()->showMessage(QString("%2, %3").arg(event->pos().x()).arg(event->pos().y()));
 }
 
 void ImageScissor::keyPressEvent(QKeyEvent *event)
 {
-    if( event->key() == Qt::Key_Control && !debugEnable )
-    {
+    if( event->key() == Qt::Key_Control && !debugEnable){
        scribbling = true;
        moveEnable = true;
        finishCurrentContourSC->setEnabled(true);
@@ -697,19 +611,10 @@ void ImageScissor::computeCost(){
     //declare var
     int w = Load_Image.width();
     int h = Load_Image.height();
-    //int id;
     int rDR, gDR, bDR;
-    //double Derivative[8];
     double max = 0;
-    //get rgb data
-    //cv::Mat rgb = qimage_to_mat_ref(image, QImage::Format_RGB32);
     for(int y = 0; y < h; y++){
         for(int x = 0; x < w; x++){
-            //initialize
-            //id = y * w + x;
-            //graphNode[x][y].column = y;
-            //graphNode[x][y].row = x;
-            //graphNode[x][y].state = 0;
             if(y>=1 && x<(w-1) && y<(h-1)){
                 //D(link0)
                 rDR = abs((Load_Image.pixelColor(x,y-1).red()+  Load_Image.pixelColor(x+1,y-1).red())-  (Load_Image.pixelColor(x,y+1).red()+  Load_Image.pixelColor(x+1,y+1).red()))/4;
@@ -805,8 +710,7 @@ void ImageScissor::computeCost(){
 
     for(int y = 0; y < h; y++){
         for(int x = 0; x < w; x++){
-            for(int i = 0;i < 8;i++)
-            {
+            for(int i = 0;i < 8;i++){
                 graphNode[x][y].linkCost[i] = (max - graphNode[x][y].linkCost[i]) * 1;
                 if(i%2 != 0)
                     graphNode[x][y].linkCost[i] *= sqrt(2);
@@ -820,10 +724,9 @@ void ImageScissor::GetPath(QPoint st)
 {
     costMax = 0;
 
-    for(int i = 0;i < Load_Image.width();i++)
-    {
-        for(int j = 0; j < Load_Image.height();j++)
-        {
+    //initialize
+    for(int i = 0;i < Load_Image.width();i++){
+        for(int j = 0; j < Load_Image.height();j++){
            graphNode[i][j].prevNode = NULL;
            graphNode[i][j].state  = 0;
            graphNode[i][j].totalCost = MAX;
@@ -839,9 +742,9 @@ void ImageScissor::GetPath(QPoint st)
         Node* a = pq.top();
         pq.pop();
         a->state = 2;
-        //a->totalCost = 0;
         int a_x = a->row;
         int a_y = a->column;
+
         if(a->totalCost > costMax)
             costMax = a->totalCost;
 
@@ -874,7 +777,6 @@ void ImageScissor::GetPath(QPoint st)
 
 void ImageScissor::addFollowingSeedPoint()
 {
-    //endPoint = cursorSnap(event->pos());
     if(Load_Image.isNull() || !scribbling)
         return;
 
@@ -882,28 +784,22 @@ void ImageScissor::addFollowingSeedPoint()
         return;
 
     Node *node = &graphNode[lastPoint.x()][lastPoint.y()];
-    if(seedPoints.isEmpty())
-    {
+    if(seedPoints.isEmpty()){
         wirePoints.append(QPoint(lastPoint.x(), lastPoint.y()));
-        //drawLineWithNode();
-        //statusBar()->showMessage(QString("%1").arg(wirePoints.size()));
     }
-    else
-    {
+    else{
         QPoint lastSeed = seedPoints.last();
         QVector<QPoint> tmpVec;
-        while(node != NULL)
-        {
+        while(node != NULL){
             if(node->row == lastSeed.x() && node->column == lastSeed.y())
-            {
                 break;
-             }
 
             tmpVec.prepend(QPoint(node->row,node->column));
             node = node->prevNode;
         }
         wirePoints += tmpVec;
     }
+
     drawLineWithNode();
     seedPoints.append(QPoint(lastPoint.x(),lastPoint.y()));
     GetPath(seedPoints.last());
@@ -927,18 +823,13 @@ QPoint ImageScissor::cursorSnap(QPoint point)
     int newY = converted_p.y() - range;
     int relocX = converted_p.x(), relocY = converted_p.y();
     double localMax = 0.0;
-    for(int i = 0;i < range * 2 + 1;i++)
-    {
-        for(int j = 0;j < range * 2 + 1;j++)
-        {
+    for(int i = 0;i < range * 2 + 1;i++){
+        for(int j = 0;j < range * 2 + 1;j++){
             int tmpX = newX + i;
             int tmpY = newY + j;
-
             //make sure mouse location is not at the edge of the picture;
-            if(atImage(QPoint(tmpX,tmpY)))
-            {
-                if(localMax < graphNode[tmpX][tmpY].maxDeriv)
-                {
+            if(atImage(QPoint(tmpX,tmpY))){
+                if(localMax < graphNode[tmpX][tmpY].maxDeriv){
                     localMax = graphNode[tmpX][tmpY].maxDeriv;
                     relocX = tmpX;
                     relocY = tmpY;
@@ -948,6 +839,7 @@ QPoint ImageScissor::cursorSnap(QPoint point)
         }
     }
 
+    //force the node not to be at the image edges
     if(relocX == 0)
         relocX += 1;
     else if(relocX == ui->label->pixmap()->height() - 1)
@@ -966,36 +858,25 @@ void ImageScissor::drawLineWithNode()
 {
     QPainter painter(&qpixmap);
 
-    for(int i = 0;i < wirePointsVector.size();i++)
-    {
+    for(int i = 0;i < wirePointsVector.size();i++){
 
         if(i == selectedContour)
-        {
             painter.setPen(QPen(Qt::red, 2, Qt::SolidLine, Qt::RoundCap,
                                 Qt::RoundJoin));
-        }
         else
-        {
             painter.setPen(QPen(Qt::green, 2, Qt::SolidLine, Qt::RoundCap,
                                 Qt::RoundJoin));
-        }
 
         for(int j = wirePointsVector.at(i).size() - 1;j >= 0;j--)
-        {
             painter.drawPoint(wirePointsVector.at(i).at(j));
-            //if(seedPoints.size() > 1 && wirePoints.at(i) == seedPoints.at(seedPoints.size() - 2))
-                //break;
-        }
     }
 
     painter.setPen(QPen(Qt::red, 2, Qt::SolidLine, Qt::RoundCap,
                         Qt::RoundJoin));
+
     for(int j = wirePoints.size() - 1;j >= 0;j--)
-    {
         painter.drawPoint(wirePoints.at(j));
-        //if(seedPoints.size() > 1 && wirePoints.at(i) == seedPoints.at(seedPoints.size() - 2))
-            //break;
-    }
+
     ui->label->setPixmap(qpixmap);
 }
 
@@ -1014,24 +895,20 @@ bool ImageScissor::atImage(QPoint point)
 }
 
 //Edit Contour
-void ImageScissor::selectContour(){
-    if(scribbling && moveEnable)
-    {
+void ImageScissor::selectContour()
+{
+    if(scribbling && moveEnable){
         selectedContour = -1;
         return;
     }
-    if(wirePointsVector.isEmpty())
-    {
+    if(wirePointsVector.isEmpty()){
         selectedContour = -1;
         return;
     }
-    for(int i = 0;i < wirePointsVector.size();i++)
-    {
-        for(int j = 0;j < wirePointsVector.at(i).size();j++)
-        {
+    for(int i = 0;i < wirePointsVector.size();i++){
+        for(int j = 0;j < wirePointsVector.at(i).size();j++){
             QPoint tmpPoint = wirePointsVector.at(i).at(j) - lastPoint;
-            if((tmpPoint.x() * tmpPoint.x() + tmpPoint.y() * tmpPoint.y()) <= 4)
-            {
+            if((tmpPoint.x() * tmpPoint.x() + tmpPoint.y() * tmpPoint.y()) <= 4){
                 selectedContour = i;
                 return;
             }
@@ -1048,15 +925,12 @@ void ImageScissor::finishCurrentContour()
     addFollowingSeedPoint();
 
     QVector<QPoint> tmpVec;
-    for(int i = 0;i < wirePoints.size();i++)
-    {
+    for(int i = 0;i < wirePoints.size();i++){
         QPoint tmpPoint = wirePoints.at(i);
         tmpVec.append(QPoint(tmpPoint.x(),tmpPoint.y()));
     }
     if(!tmpVec.isEmpty())
-    {
         wirePointsVector.append(tmpVec);
-    }
 
     wirePoints.clear();
     seedPoints.clear();
@@ -1068,37 +942,32 @@ void ImageScissor::finishCurrentContour()
 
 void ImageScissor::undo(){
 
-    if(!scribbling && !moveEnable && selectedContour >= 0)
-    {
+    if(!scribbling && !moveEnable && selectedContour >= 0){
         wirePointsVector.remove(selectedContour);
         selectedContour = -1;
     }
-    else
-    {
+    else{
         if(seedPoints.isEmpty())
             return;
         seedPoints.pop_back();
         wirePoints.pop_back();
 
-        if(!seedPoints.isEmpty())
-        {
-            while((wirePoints.last() != seedPoints.last()  && !(wirePoints.isEmpty())))
-            {
+        if(!seedPoints.isEmpty()){
+            while((wirePoints.last() != seedPoints.last()  && !(wirePoints.isEmpty()))){
                 wirePoints.pop_back();
                 //statusBar()->showMessage(QString("%1,%2").arg(wirePoints.size()).arg(seedPoints.size()));
-                //statusBar()->showMessage(QString("%1,%2,%3,%4").arg(lastSeed.x()).arg(lastWirePoint.x()).arg(lastSeed.y()).arg(lastWirePoint.y()));
             }
         }
 
-        if(seedPoints.size() == 1)
-        {
-                  wirePoints.pop_back();
-                  seedPoints.clear();
+        if(seedPoints.size() == 1){
+            wirePoints.pop_back();
+            seedPoints.clear();
         }
 
         if(!seedPoints.isEmpty())
             GetPath(seedPoints.last());
     }
+
     qpixmap = QPixmap::fromImage(Load_Image);
     drawLineWithNode();
     statusBar()->showMessage(QString("%1,%2").arg(wirePoints.size()).arg(seedPoints.size()));

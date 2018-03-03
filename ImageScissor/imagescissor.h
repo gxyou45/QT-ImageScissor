@@ -7,7 +7,6 @@
 #include <QMessageBox>
 #include <QScrollBar>
 #include <QPixmap>
-//#include <QPainter>
 #include <QPalette>
 #include <QSizePolicy>
 #include <QFileDialog>
@@ -16,7 +15,6 @@
 #include <QSize>
 #include <imagenode.h>
 #include <opencv2/opencv.hpp>
-//#include <QGridLayout>
 #include <math.h>
 #include <QtGui>
 #include <QShortcut>
@@ -30,9 +28,6 @@ class ImageScissor : public QMainWindow
     Q_OBJECT
 
 public:
-    //imagelabel *my_label;
-
-    //double scale;
     explicit ImageScissor(QWidget *parent = 0);
     ~ImageScissor();
 
@@ -46,23 +41,14 @@ private slots:
     void on_actionSave_Mask_triggered();
     void on_actionZoom_In_triggered();
     void on_actionZoom_Out_triggered();
-
     void on_actionPixel_Node_triggered();
-
     void on_actionImage_Only_triggered();
-
     void on_actionCost_Graph_triggered();
-
     void on_actionPath_Tree_triggered();
-
     void on_actionMin_Path_triggered();
-
     void on_actionOrigin_triggered();
-
     void on_actionBlur_1_2_triggered();
-
     void on_actionBlur_1_4_triggered();
-
     void on_actionBlur_1_8_triggered();
 
 private:
@@ -92,9 +78,6 @@ private:
     bool debugEnable;
 
     QPoint lastPoint;
-
-    //std::vector<Node*> graphNode;
-
     ImageNode *my_shortPath;
     int my_x;
     int my_y;
@@ -110,7 +93,6 @@ private:
 
     void setImage(const QImage &newImage);
     void scaleImage(double factor);
-
     void adjustScrollBar(QScrollBar *scrollBar, double factor);
     void getPixelNode();
     void getCostGraph();
@@ -139,7 +121,6 @@ private:
     QShortcut *undoSC;
 
 protected:
-    //void paintEvent(QPaintEvent *event);
     void mousePressEvent(QMouseEvent *event);
     void mouseMoveEvent(QMouseEvent *event);
     void mouseReleaseEvent(QMouseEvent *event);
